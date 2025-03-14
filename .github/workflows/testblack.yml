@@ -1,0 +1,84 @@
+name: Windows 10 Tailscale Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Enter the username for the remote user"
+        required: true
+        default: "runneradmin"
+      password:
+        description: "Enter the password for the remote user"
+        required: true
+        default: "@cyb3rking"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 9999
+
+    steps:
+    # Step 1: Download & Install Tailscale
+    - name: Download Tailscale
+      run: Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe -OutFile tailscale-setup.exe
+
+    - name: Install Tailscale
+      run: Start-Process -FilePath "tailscale-setup.exe" -ArgumentList "/quiet" -Wait
+
+    - name: Start Tailscale and Authenticate
+      run: |
+        & "C:\Program Files\Tailscale\tailscale.exe" up
+        Write-Host "✅ Tailscale authentication started. Please visit the link to authenticate."
+
+    # Step 2: Enable Remote Desktop
+    - name: Enable Remote Desktop
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Write-Host "✅ Remote Desktop Enabled."
+
+    # Step 3: Create or Update User for RDP Access and Admin Rights
+    - name: Create or Update User for RDP Access
+      run: |
+        $username = "${{ github.event.inputs.username }}"
+        $password = "${{ github.event.inputs.password }}"
+        
+        $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+        
+        if ($null -eq $user) {
+            New-LocalUser -Name $username -Password (ConvertTo-SecureString -AsPlainText $password -Force) -FullName $username -Description "RDP User"
+            Write-Host "✅ User '$username' created successfully."
+        } else {
+            Set-LocalUser -Name $username -Password (ConvertTo-SecureString -AsPlainText $password -Force)
+            Write-Host "✅ Password updated for user '$username'."
+        }
+
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+        Write-Host "✅ User '$username' added to 'Remote Desktop Users'."
+
+        Add-LocalGroupMember -Group "Administrators" -Member $username
+        Write-Host "✅ User '$username' added to 'Administrators'."
+
+    # Step 4: Install VirtualBox
+    - name: Install VirtualBox
+      run: |
+        Write-Host "⬇ Downloading VirtualBox..."
+        Invoke-WebRequest -Uri "https://download.virtualbox.org/virtualbox/7.0.14/VirtualBox-7.0.14-161095-Win.exe" -OutFile "VirtualBox.exe"
+        
+        Write-Host "🛠 Installing VirtualBox..."
+        Start-Process -FilePath "VirtualBox.exe" -ArgumentList "--silent" -Wait
+
+        Write-Host "✅ VirtualBox installed successfully."
+
+    # Step 5: Verify Tailscale Connection
+    - name: Verify Tailscale Connection
+      run: |
+        & "C:\Program Files\Tailscale\tailscale.exe" status
+        Write-Host "✅ Tailscale connection verified."
+
+    # Step 6: Keep Workflow Running
+    - name: Keep Workflow Running
+      run: |
+        Write-Host "🛠 Keeping the workflow running... Press Ctrl+C to stop."
+        while ($true) { Start-Sleep -Seconds 10 }
